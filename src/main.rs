@@ -199,9 +199,10 @@ impl eframe::App for App {
         });
 
         egui::SidePanel::left("list")
-            .default_width(150.0)
+            .default_width(300.0)
             .min_width(20.0)
             .show(ctx, |ui| {
+                ui.set_min_width(ui.available_width());
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for i in 0..n {
                         let (thumb_info, name) = {
