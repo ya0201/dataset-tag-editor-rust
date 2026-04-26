@@ -397,9 +397,19 @@ impl eframe::App for App {
                                     .show(ui, |ui| {
                                         ui.horizontal(|ui| {
                                             ui.spacing_mut().item_spacing.x = 4.0;
-                                            ui.label(
-                                                egui::RichText::new(tag.as_str())
-                                                    .color(egui::Color32::WHITE),
+                                            let handle = ui.add(
+                                                egui::Label::new(
+                                                    egui::RichText::new("≡")
+                                                        .color(egui::Color32::from_white_alpha(160)),
+                                                )
+                                                .sense(egui::Sense::drag()),
+                                            );
+                                            ui.add(
+                                                egui::Label::new(
+                                                    egui::RichText::new(tag.as_str())
+                                                        .color(egui::Color32::WHITE),
+                                                )
+                                                .selectable(false),
                                             );
                                             if !being_dragged {
                                                 if ui
@@ -408,21 +418,19 @@ impl eframe::App for App {
                                                             egui::RichText::new("⊗")
                                                                 .color(egui::Color32::WHITE),
                                                         )
-                                                        .sense(egui::Sense::click()),
+                                                        .sense(egui::Sense::click())
+                                                        .selectable(false),
                                                     )
                                                     .clicked()
                                                 {
                                                     remove_idx = Some(i);
                                                 }
                                             }
-                                        });
+                                            handle
+                                        })
+                                        .inner
                                     });
-                                let chip_resp = ui.interact(
-                                    inner.response.rect,
-                                    egui::Id::new("chip").with(i),
-                                    egui::Sense::drag(),
-                                );
-                                if chip_resp.drag_started() {
+                                if inner.inner.drag_started() {
                                     new_drag_idx = Some(i);
                                 }
                                 // ポインタ位置で直接ホバー判定（drag中はhovered()が抑制されるため）
@@ -433,7 +441,7 @@ impl eframe::App for App {
                                 });
                                 if being_dragged {
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                                } else if self.drag_idx.is_none() && hovered {
+                                } else if self.drag_idx.is_none() && inner.inner.hovered() {
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                                 }
                                 if self.drag_idx.is_some() && !being_dragged && hovered {
