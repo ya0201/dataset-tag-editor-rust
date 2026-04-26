@@ -4,6 +4,7 @@ use std::{fs, path::{Path, PathBuf}};
 struct Entry {
     image_path: PathBuf,
     caption_path: PathBuf,
+    thumbnail: Option<egui::TextureHandle>,
 }
 
 #[derive(Default)]
@@ -33,7 +34,8 @@ impl App {
                 .map(|ext| parent.join(format!("{stem}{ext}")))
                 .find(|p| p.exists())
                 .unwrap_or_else(|| parent.join(format!("{stem}.txt")));
-            Entry { image_path: img, caption_path: caption }
+            let thumbnail = load_thumbnail(ctx, &img);
+            Entry { image_path: img, caption_path: caption, thumbnail }
         }).collect();
         self.current = 0;
         self.load_entry(ctx);
@@ -69,6 +71,13 @@ impl App {
         let next = ((self.current as i32 + delta).rem_euclid(n as i32)) as usize;
         self.go_to(next, ctx);
     }
+}
+
+fn load_thumbnail(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
+    let img = image::open(path).ok()?.thumbnail(80, 80).to_rgba8();
+    let size = [img.width() as usize, img.height() as usize];
+    let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &img.into_raw());
+    Some(ctx.load_texture(format!("thumb:{}", path.to_string_lossy()), color_image, egui::TextureOptions::LINEAR))
 }
 
 fn load_texture(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
@@ -112,14 +121,30 @@ impl eframe::App for App {
             });
         });
 
-        egui::SidePanel::left("list").show(ctx, |ui| {
+        egui::SidePanel::left("list").min_width(100.0).show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for i in 0..n {
-                    let name = self.entries[i].image_path.file_name()
-                        .unwrap().to_string_lossy().to_string();
-                    if ui.selectable_label(i == self.current, name).clicked() && i != self.current {
-                        self.go_to(i, ctx);
-                    }
+                    let (thumb_info, name) = {
+                        let e = &self.entries[i];
+                        let info = e.thumbnail.as_ref().map(|t| (t.id(), t.size()));
+                        let name = e.image_path.file_name().unwrap().to_string_lossy().to_string();
+                        (info, name)
+                    };
+                    let is_selected = i == self.current;
+                    ui.horizontal(|ui| {
+                        let thumb_clicked = if let Some((id, [w, h])) = thumb_info {
+                            let th = 64.0f32;
+                            let tw = w as f32 * th / h as f32;
+                            ui.add(egui::Image::new((id, egui::vec2(tw, th)))
+                                .sense(egui::Sense::click()))
+                                .clicked()
+                        } else { false };
+                        let label_clicked = ui.selectable_label(is_selected, &name).clicked();
+                        if (thumb_clicked || label_clicked) && !is_selected {
+                            self.go_to(i, ctx);
+                        }
+                    });
+                    ui.separator();
                 }
             });
         });
