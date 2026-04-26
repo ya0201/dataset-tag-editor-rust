@@ -21,6 +21,7 @@ struct App {
     add_tag_input: String,
     drag_idx: Option<usize>,
     pending: HashMap<usize, String>,
+    confirm_close: bool,
 }
 
 impl App {
@@ -166,6 +167,50 @@ fn load_texture(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle>
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if ctx.input(|i| i.viewport().close_requested()) && !self.pending.is_empty() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.confirm_close = true;
+        }
+
+        if self.confirm_close {
+            let screen = ctx.screen_rect();
+            egui::Area::new(egui::Id::new("modal_overlay"))
+                .fixed_pos(screen.min)
+                .order(egui::Order::Background)
+                .show(ctx, |ui| {
+                    ui.painter().rect_filled(
+                        screen,
+                        egui::Rounding::ZERO,
+                        egui::Color32::from_black_alpha(160),
+                    );
+                    ui.allocate_rect(screen, egui::Sense::click());
+                });
+            egui::Window::new("未保存の変更")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    ui.label(format!("{}件の未保存の変更があります。", self.pending.len()));
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("全保存して終了").clicked() {
+                            self.save_all();
+                            self.confirm_close = false;
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        if ui.button("破棄して終了").clicked() {
+                            self.pending.clear();
+                            self.confirm_close = false;
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        if ui.button("キャンセル").clicked() {
+                            self.confirm_close = false;
+                        }
+                    });
+                });
+        }
+
         let dropped_dir = ctx.input(|i| {
             i.raw.dropped_files.iter().find_map(|f| {
                 f.path.as_ref().filter(|p| p.is_dir()).cloned()
