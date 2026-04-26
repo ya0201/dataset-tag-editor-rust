@@ -158,7 +158,7 @@ impl eframe::App for App {
             });
         });
 
-        egui::SidePanel::left("list").min_width(100.0).show(ctx, |ui| {
+        egui::SidePanel::left("list").default_width(150.0).min_width(20.0).show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for i in 0..n {
                     let (thumb_info, name) = {
@@ -168,18 +168,27 @@ impl eframe::App for App {
                         (info, name)
                     };
                     let is_selected = i == self.current;
-                    ui.horizontal(|ui| {
-                        let thumb_clicked = if let Some((id, [w, h])) = thumb_info {
-                            let th = 64.0f32;
-                            let tw = w as f32 * th / h as f32;
-                            ui.add(egui::Image::new((id, egui::vec2(tw, th)))
-                                .sense(egui::Sense::click()))
-                                .clicked()
-                        } else { false };
-                        let label_clicked = ui.selectable_label(is_selected, &name).clicked();
-                        if (thumb_clicked || label_clicked) && !is_selected {
-                            self.go_to(i, ctx);
-                        }
+                    let fill = if is_selected {
+                        ui.visuals().selection.bg_fill
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    };
+                    egui::Frame::none().fill(fill).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let thumb_clicked = if let Some((id, [w, h])) = thumb_info {
+                                let th = 64.0f32;
+                                let tw = w as f32 * th / h as f32;
+                                ui.add(egui::Image::new((id, egui::vec2(tw, th)))
+                                    .sense(egui::Sense::click()))
+                                    .clicked()
+                            } else { false };
+                            let label_clicked = ui.add(
+                                egui::Label::new(&name).truncate().sense(egui::Sense::click())
+                            ).clicked();
+                            if (thumb_clicked || label_clicked) && !is_selected {
+                                self.go_to(i, ctx);
+                            }
+                        });
                     });
                     ui.separator();
                 }
