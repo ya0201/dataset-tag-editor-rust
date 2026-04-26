@@ -12,6 +12,7 @@ struct Settings {
     list_width: f32,
     tag_width: f32,
     caption_height: f32,
+    last_dir: Option<PathBuf>,
 }
 
 impl Default for Settings {
@@ -21,6 +22,7 @@ impl Default for Settings {
             list_width: 300.0,
             tag_width: 200.0,
             caption_height: 160.0,
+            last_dir: None,
         }
     }
 }
@@ -48,6 +50,7 @@ fn load_settings() -> Settings {
                     "list_width"     => { if let Ok(x) = v.parse() { s.list_width     = x; } }
                     "tag_width"      => { if let Ok(x) = v.parse() { s.tag_width      = x; } }
                     "caption_height" => { if let Ok(x) = v.parse() { s.caption_height = x; } }
+                    "last_dir"       => { s.last_dir = Some(PathBuf::from(v)); }
                     _ => {}
                 }
             }
@@ -62,13 +65,14 @@ fn save_settings(s: &Settings) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    let _ = fs::write(
-        &path,
-        format!(
-            "zoom={}\nlist_width={}\ntag_width={}\ncaption_height={}\n",
-            s.zoom, s.list_width, s.tag_width, s.caption_height,
-        ),
+    let mut content = format!(
+        "zoom={}\nlist_width={}\ntag_width={}\ncaption_height={}\n",
+        s.zoom, s.list_width, s.tag_width, s.caption_height,
     );
+    if let Some(dir) = &s.last_dir {
+        content.push_str(&format!("last_dir={}\n", dir.to_string_lossy()));
+    }
+    let _ = fs::write(&path, content);
 }
 
 // ── アプリ ────────────────────────────────────────────────────────────────────
@@ -89,7 +93,10 @@ struct App {
     add_tag_input: String,
     drag_idx: Option<usize>,
     pending: HashMap<usize, String>,
+    current_dir: Option<PathBuf>,
     confirm_close: bool,
+    confirm_close_dir: bool,
+    close_dir_pending: bool,
     native_ppp: f32,
     zoom: f32,
     list_width: f32,
@@ -104,11 +111,13 @@ impl App {
             list_width: self.list_width,
             tag_width: self.tag_width,
             caption_height: self.caption_height,
+            last_dir: self.current_dir.clone(),
         }
     }
 
     fn load_dir(&mut self, dir: &Path, ctx: &egui::Context) {
         self.pending.clear();
+        self.current_dir = Some(dir.to_path_buf());
         let mut paths: Vec<PathBuf> = fs::read_dir(dir)
             .into_iter()
             .flatten()
@@ -138,6 +147,17 @@ impl App {
         self.current = 0;
         self.load_entry(ctx);
         self.rebuild_tag_counts();
+    }
+
+    fn close_dir(&mut self) {
+        self.entries.clear();
+        self.current = 0;
+        self.caption.clear();
+        self.texture = None;
+        self.tag_counts.clear();
+        self.pending.clear();
+        self.drag_idx = None;
+        self.current_dir = None;
     }
 
     fn rebuild_tag_counts(&mut self) {
@@ -241,10 +261,28 @@ fn load_texture(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle>
     Some(ctx.load_texture("image", color_image, egui::TextureOptions::LINEAR))
 }
 
+fn show_overlay(ctx: &egui::Context) {
+    let screen = ctx.screen_rect();
+    egui::Area::new(egui::Id::new("modal_overlay"))
+        .fixed_pos(screen.min)
+        .order(egui::Order::Background)
+        .show(ctx, |ui| {
+            ui.painter().rect_filled(screen, egui::Rounding::ZERO, egui::Color32::from_black_alpha(160));
+            ui.allocate_rect(screen, egui::Sense::click());
+        });
+}
+
 // ── UI ───────────────────────────────────────────────────────────────────────
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // ディレクトリクローズの遅延実行（n 計算前に処理）
+        if self.close_dir_pending {
+            self.close_dir_pending = false;
+            self.close_dir();
+            save_settings(&self.current_settings());
+        }
+
         // ズームショートカット
         let (zoom_in, zoom_out, zoom_reset) = ctx.input(|i| {
             let cmd = i.modifiers.command;
@@ -263,7 +301,7 @@ impl eframe::App for App {
             save_settings(&self.current_settings());
         }
 
-        // 終了処理
+        // アプリ終了
         if ctx.input(|i| i.viewport().close_requested()) {
             save_settings(&self.current_settings());
             if !self.pending.is_empty() {
@@ -272,18 +310,11 @@ impl eframe::App for App {
             }
         }
 
+        // アプリ終了確認モーダル
         if self.confirm_close {
-            let screen = ctx.screen_rect();
-            egui::Area::new(egui::Id::new("modal_overlay"))
-                .fixed_pos(screen.min)
-                .order(egui::Order::Background)
-                .show(ctx, |ui| {
-                    ui.painter().rect_filled(screen, egui::Rounding::ZERO, egui::Color32::from_black_alpha(160));
-                    ui.allocate_rect(screen, egui::Sense::click());
-                });
+            show_overlay(ctx);
             egui::Window::new("未保存の変更")
-                .collapsible(false)
-                .resizable(false)
+                .collapsible(false).resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
@@ -307,6 +338,35 @@ impl eframe::App for App {
                 });
         }
 
+        // ディレクトリを閉じる確認モーダル
+        if self.confirm_close_dir {
+            show_overlay(ctx);
+            egui::Window::new("未保存の変更##dir")
+                .collapsible(false).resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    ui.label(format!("{}件の未保存の変更があります。", self.pending.len()));
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("全保存して閉じる").clicked() {
+                            self.save_all();
+                            self.close_dir();
+                            self.confirm_close_dir = false;
+                            save_settings(&self.current_settings());
+                        }
+                        if ui.button("破棄して閉じる").clicked() {
+                            self.close_dir();
+                            self.confirm_close_dir = false;
+                            save_settings(&self.current_settings());
+                        }
+                        if ui.button("キャンセル").clicked() {
+                            self.confirm_close_dir = false;
+                        }
+                    });
+                });
+        }
+
         // フォルダドロップ
         let dropped_dir = ctx.input(|i| {
             i.raw.dropped_files.iter().find_map(|f| {
@@ -315,6 +375,7 @@ impl eframe::App for App {
         });
         if let Some(dir) = dropped_dir {
             self.load_dir(&dir, ctx);
+            save_settings(&self.current_settings());
         }
 
         // キーボードナビゲーション
@@ -338,6 +399,16 @@ impl eframe::App for App {
                 if ui.button("Open Directory").clicked() {
                     if let Some(dir) = rfd::FileDialog::new().pick_folder() {
                         self.load_dir(&dir, ctx);
+                        save_settings(&self.current_settings());
+                    }
+                }
+                if self.current_dir.is_some() {
+                    if ui.button("Close Directory").clicked() {
+                        if self.pending.is_empty() {
+                            self.close_dir_pending = true;
+                        } else {
+                            self.confirm_close_dir = true;
+                        }
                     }
                 }
                 if n > 0 {
@@ -606,14 +677,20 @@ fn main() -> eframe::Result<()> {
             let native_ppp = cc.egui_ctx.pixels_per_point();
             let s = load_settings();
             cc.egui_ctx.set_pixels_per_point(native_ppp * s.zoom);
-            Ok(Box::new(App {
+            let mut app = App {
                 native_ppp,
                 zoom: s.zoom,
                 list_width: s.list_width,
                 tag_width: s.tag_width,
                 caption_height: s.caption_height,
                 ..Default::default()
-            }))
+            };
+            if let Some(dir) = s.last_dir {
+                if dir.is_dir() {
+                    app.load_dir(&dir, &cc.egui_ctx);
+                }
+            }
+            Ok(Box::new(app))
         }),
     )
 }
