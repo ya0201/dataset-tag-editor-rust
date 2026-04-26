@@ -17,15 +17,15 @@ struct App {
     current: usize,
     caption: String,
     texture: Option<egui::TextureHandle>,
-    dirty: bool,
     tag_counts: Vec<(String, usize)>,
     add_tag_input: String,
     drag_idx: Option<usize>,
+    pending: HashMap<usize, String>,
 }
 
 impl App {
     fn load_dir(&mut self, dir: &Path, ctx: &egui::Context) {
-        self.save_if_dirty();
+        self.pending.clear();
         let mut paths: Vec<PathBuf> = fs::read_dir(dir)
             .into_iter()
             .flatten()
@@ -63,8 +63,10 @@ impl App {
 
     fn rebuild_tag_counts(&mut self) {
         let mut counts: HashMap<String, usize> = HashMap::new();
-        for entry in &self.entries {
-            let text = fs::read_to_string(&entry.caption_path).unwrap_or_default();
+        for (i, entry) in self.entries.iter().enumerate() {
+            let text = self.pending.get(&i)
+                .cloned()
+                .unwrap_or_else(|| fs::read_to_string(&entry.caption_path).unwrap_or_default());
             for tag in text.split(',') {
                 let tag = tag.trim();
                 if !tag.is_empty() {
@@ -82,25 +84,37 @@ impl App {
         self.texture = None;
         self.drag_idx = None;
         if let Some(entry) = self.entries.get(self.current) {
-            self.caption = fs::read_to_string(&entry.caption_path).unwrap_or_default();
+            self.caption = self.pending.get(&self.current)
+                .cloned()
+                .unwrap_or_else(|| fs::read_to_string(&entry.caption_path).unwrap_or_default());
             self.texture = load_texture(ctx, &entry.image_path);
         }
-        self.dirty = false;
     }
 
-    fn save_if_dirty(&mut self) {
-        if !self.dirty {
-            return;
-        }
+    fn mark_dirty(&mut self) {
+        self.pending.insert(self.current, self.caption.clone());
+        self.rebuild_tag_counts();
+    }
+
+    fn save_current(&mut self) {
         if let Some(entry) = self.entries.get(self.current) {
             let _ = fs::write(&entry.caption_path, &self.caption);
+            self.pending.remove(&self.current);
         }
-        self.dirty = false;
+        self.rebuild_tag_counts();
+    }
+
+    fn save_all(&mut self) {
+        for (i, text) in &self.pending {
+            if let Some(entry) = self.entries.get(*i) {
+                let _ = fs::write(&entry.caption_path, text);
+            }
+        }
+        self.pending.clear();
         self.rebuild_tag_counts();
     }
 
     fn go_to(&mut self, index: usize, ctx: &egui::Context) {
-        self.save_if_dirty();
         self.current = index;
         self.load_entry(ctx);
     }
@@ -177,6 +191,8 @@ impl eframe::App for App {
         }
 
         let n = self.entries.len();
+        let current_dirty = self.pending.contains_key(&self.current);
+        let any_dirty = !self.pending.is_empty();
 
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -199,9 +215,17 @@ impl eframe::App for App {
                         .unwrap()
                         .to_string_lossy()
                         .to_string();
-                    ui.label(format!("{}/{}: {name}", self.current + 1, n));
-                    if self.dirty && ui.button("Save").clicked() {
-                        self.save_if_dirty();
+                    let label = if current_dirty {
+                        format!("* {}/{}: {name}", self.current + 1, n)
+                    } else {
+                        format!("{}/{}: {name}", self.current + 1, n)
+                    };
+                    ui.label(label);
+                    if current_dirty && ui.button("Save").clicked() {
+                        self.save_current();
+                    }
+                    if any_dirty && ui.button("Save All").clicked() {
+                        self.save_all();
                     }
                 }
             });
@@ -214,7 +238,7 @@ impl eframe::App for App {
                 ui.set_min_width(ui.available_width());
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for i in 0..n {
-                        let (thumb_info, name) = {
+                        let (thumb_info, name, is_entry_dirty) = {
                             let e = &self.entries[i];
                             let info = e.thumbnail.as_ref().map(|t| (t.id(), t.size()));
                             let name = e
@@ -223,7 +247,8 @@ impl eframe::App for App {
                                 .unwrap()
                                 .to_string_lossy()
                                 .to_string();
-                            (info, name)
+                            let dirty = self.pending.contains_key(&i);
+                            (info, name, dirty)
                         };
                         let is_selected = i == self.current;
                         let fill = if is_selected {
@@ -240,7 +265,16 @@ impl eframe::App for App {
                                     let tw = w as f32 * th / h as f32;
                                     ui.add(egui::Image::new((id, egui::vec2(tw, th))));
                                 }
-                                ui.add(egui::Label::new(&name).truncate());
+                                ui.vertical(|ui| {
+                                    if is_entry_dirty {
+                                        ui.label(
+                                            egui::RichText::new("●")
+                                                .color(egui::Color32::from_rgb(245, 158, 11))
+                                                .small(),
+                                        );
+                                    }
+                                    ui.add(egui::Label::new(&name).truncate());
+                                });
                             });
                         });
                         if ui
@@ -377,7 +411,7 @@ impl eframe::App for App {
                         .map(|(_, t)| t.as_str())
                         .collect::<Vec<_>>()
                         .join(", ");
-                    self.dirty = true;
+                    self.mark_dirty();
                 }
                 if released {
                     if let (Some(src), Some(dst)) = (self.drag_idx, drop_target) {
@@ -385,7 +419,7 @@ impl eframe::App for App {
                         let item = v.remove(src);
                         v.insert(dst, item);
                         self.caption = v.join(", ");
-                        self.dirty = true;
+                        self.mark_dirty();
                     }
                     new_drag_idx = None;
                 }
@@ -408,7 +442,7 @@ impl eframe::App for App {
                                 self.caption.push_str(&new_tag);
                             }
                             self.add_tag_input.clear();
-                            self.dirty = true;
+                            self.mark_dirty();
                         }
                     }
                 });
