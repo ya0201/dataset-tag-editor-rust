@@ -152,6 +152,15 @@ fn load_texture(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle>
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let dropped_dir = ctx.input(|i| {
+            i.raw.dropped_files.iter().find_map(|f| {
+                f.path.as_ref().filter(|p| p.is_dir()).cloned()
+            })
+        });
+        if let Some(dir) = dropped_dir {
+            self.load_dir(&dir, ctx);
+        }
+
         if !ctx.wants_keyboard_input() {
             let delta = ctx.input(|i| {
                 if i.key_pressed(egui::Key::ArrowLeft) {
@@ -405,19 +414,42 @@ impl eframe::App for App {
                 });
             });
 
-        egui::CentralPanel::default().show(ctx, |ui| match &self.texture {
-            Some(tex) => {
-                let avail = ui.available_size();
-                let img_size = tex.size_vec2();
-                let scale = (avail.x / img_size.x).min(avail.y / img_size.y).min(1.0);
-                ui.centered_and_justified(|ui| {
-                    ui.image((tex.id(), img_size * scale));
-                });
+        let hovering_dir = ctx.input(|i| {
+            i.raw.hovered_files.iter().any(|f| {
+                f.path.as_ref().is_some_and(|p| p.is_dir())
+            })
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            match &self.texture {
+                Some(tex) => {
+                    let avail = ui.available_size();
+                    let img_size = tex.size_vec2();
+                    let scale = (avail.x / img_size.x).min(avail.y / img_size.y).min(1.0);
+                    ui.centered_and_justified(|ui| {
+                        ui.image((tex.id(), img_size * scale));
+                    });
+                }
+                None => {
+                    ui.centered_and_justified(|ui| {
+                        ui.label("ディレクトリを開いてください");
+                    });
+                }
             }
-            None => {
-                ui.centered_and_justified(|ui| {
-                    ui.label("ディレクトリを開いてください");
-                });
+            if hovering_dir {
+                let rect = ui.ctx().screen_rect();
+                ui.painter().rect_filled(
+                    rect,
+                    egui::Rounding::same(0.0),
+                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+                );
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "ここにドロップ",
+                    egui::FontId::proportional(32.0),
+                    egui::Color32::WHITE,
+                );
             }
         });
     }
