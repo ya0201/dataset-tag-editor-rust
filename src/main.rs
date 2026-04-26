@@ -402,7 +402,8 @@ impl eframe::App for App {
                                                     egui::RichText::new("≡")
                                                         .color(egui::Color32::from_white_alpha(160)),
                                                 )
-                                                .sense(egui::Sense::drag()),
+                                                .sense(egui::Sense::drag())
+                                                .selectable(false),
                                             );
                                             ui.add(
                                                 egui::Label::new(
