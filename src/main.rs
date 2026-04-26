@@ -22,6 +22,8 @@ struct App {
     drag_idx: Option<usize>,
     pending: HashMap<usize, String>,
     confirm_close: bool,
+    native_ppp: f32,
+    zoom: f32,
 }
 
 impl App {
@@ -167,6 +169,23 @@ fn load_texture(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle>
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let (zoom_in, zoom_out, zoom_reset) = ctx.input(|i| {
+            let cmd = i.modifiers.command;
+            (
+                cmd && (i.key_pressed(egui::Key::Equals) || i.key_pressed(egui::Key::Plus)),
+                cmd && i.key_pressed(egui::Key::Minus),
+                cmd && i.key_pressed(egui::Key::Num0),
+            )
+        });
+        if zoom_in || zoom_out || zoom_reset {
+            if zoom_in   { self.zoom = (self.zoom + 0.1).min(3.0); }
+            if zoom_out  { self.zoom = (self.zoom - 0.1).max(0.5); }
+            if zoom_reset { self.zoom = 1.0; }
+            self.zoom = (self.zoom * 10.0).round() / 10.0;
+            ctx.set_pixels_per_point(self.native_ppp * self.zoom);
+            save_zoom(self.zoom);
+        }
+
         if ctx.input(|i| i.viewport().close_requested()) && !self.pending.is_empty() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.confirm_close = true;
@@ -543,6 +562,34 @@ impl eframe::App for App {
     }
 }
 
+fn config_path() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    let base = std::env::var("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."));
+    #[cfg(not(target_os = "windows"))]
+    let base = std::env::var("HOME")
+        .map(|h| PathBuf::from(h).join(".cache"))
+        .unwrap_or_else(|_| PathBuf::from("."));
+    base.join("dataset-tag-editor-rust").join("settings.txt")
+}
+
+fn load_zoom() -> f32 {
+    fs::read_to_string(config_path())
+        .ok()
+        .and_then(|s| s.trim().parse::<f32>().ok())
+        .unwrap_or(1.0)
+        .clamp(0.5, 3.0)
+}
+
+fn save_zoom(zoom: f32) {
+    let path = config_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(path, zoom.to_string());
+}
+
 fn setup_fonts(ctx: &egui::Context) {
     #[cfg(target_os = "macos")]
     let candidates: &[&str] = &[
@@ -582,7 +629,14 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| {
             setup_fonts(&cc.egui_ctx);
-            Ok(Box::new(App::default()))
+            let native_ppp = cc.egui_ctx.pixels_per_point();
+            let zoom = load_zoom();
+            cc.egui_ctx.set_pixels_per_point(native_ppp * zoom);
+            Ok(Box::new(App {
+                native_ppp,
+                zoom,
+                ..Default::default()
+            }))
         }),
     )
 }
