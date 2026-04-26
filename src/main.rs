@@ -1,5 +1,5 @@
 use eframe::egui;
-use std::{fs, path::{Path, PathBuf}};
+use std::{collections::HashMap, fs, path::{Path, PathBuf}};
 
 struct Entry {
     image_path: PathBuf,
@@ -14,6 +14,7 @@ struct App {
     caption: String,
     texture: Option<egui::TextureHandle>,
     dirty: bool,
+    tag_counts: Vec<(String, usize)>,
 }
 
 impl App {
@@ -39,6 +40,23 @@ impl App {
         }).collect();
         self.current = 0;
         self.load_entry(ctx);
+        self.rebuild_tag_counts();
+    }
+
+    fn rebuild_tag_counts(&mut self) {
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for entry in &self.entries {
+            let text = fs::read_to_string(&entry.caption_path).unwrap_or_default();
+            for tag in text.split(',') {
+                let tag = tag.trim();
+                if !tag.is_empty() {
+                    *counts.entry(tag.to_string()).or_insert(0) += 1;
+                }
+            }
+        }
+        let mut v: Vec<(String, usize)> = counts.into_iter().collect();
+        v.sort_unstable_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        self.tag_counts = v;
     }
 
     fn load_entry(&mut self, ctx: &egui::Context) {
@@ -57,6 +75,7 @@ impl App {
             let _ = fs::write(&entry.caption_path, &self.caption);
         }
         self.dirty = false;
+        self.rebuild_tag_counts();
     }
 
     fn go_to(&mut self, index: usize, ctx: &egui::Context) {
@@ -146,6 +165,20 @@ impl eframe::App for App {
                     });
                     ui.separator();
                 }
+            });
+        });
+
+        egui::SidePanel::right("tag_counts").min_width(160.0).show(ctx, |ui| {
+            ui.label(format!("Tags ({})", self.tag_counts.len()));
+            ui.separator();
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                egui::Grid::new("tag_grid").num_columns(2).striped(true).show(ui, |ui| {
+                    for (tag, count) in &self.tag_counts {
+                        ui.label(tag.as_str());
+                        ui.label(count.to_string());
+                        ui.end_row();
+                    }
+                });
             });
         });
 
