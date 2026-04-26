@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            ext: linux
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            ext: macos
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: windows
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+
+      - name: Install dependencies (musl)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Create archive (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir -p dist
+          BIN=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[0].targets[] | select(.kind[]=="bin") | .name')
+          cp "target/${{ matrix.target }}/release/$BIN" dist/
+          cd dist && tar -czf "${BIN}-${{ matrix.ext }}.tar.gz" "$BIN"
+
+      - name: Create archive (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $bin = (cargo metadata --no-deps --format-version=1 | ConvertFrom-Json).packages[0].targets |
+            Where-Object { $_.kind -contains 'bin' } |
+            Select-Object -ExpandProperty name -First 1
+          New-Item -Force -ItemType Directory dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/$bin.exe" dist/
+          Compress-Archive -Path "dist/$bin.exe" -DestinationPath "dist/$bin-${{ matrix.ext }}.zip"
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
