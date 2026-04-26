@@ -5,6 +5,74 @@ use std::{
     path::{Path, PathBuf},
 };
 
+// ── 設定 ──────────────────────────────────────────────────────────────────────
+
+struct Settings {
+    zoom: f32,
+    list_width: f32,
+    tag_width: f32,
+    caption_height: f32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            zoom: 1.0,
+            list_width: 300.0,
+            tag_width: 200.0,
+            caption_height: 160.0,
+        }
+    }
+}
+
+fn config_path() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    let base = std::env::var("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."));
+    #[cfg(not(target_os = "windows"))]
+    let base = std::env::var("HOME")
+        .map(|h| PathBuf::from(h).join(".cache"))
+        .unwrap_or_else(|_| PathBuf::from("."));
+    base.join("dataset-tag-editor-rust").join("settings.txt")
+}
+
+fn load_settings() -> Settings {
+    let mut s = Settings::default();
+    if let Ok(text) = fs::read_to_string(config_path()) {
+        for line in text.lines() {
+            if let Some((k, v)) = line.split_once('=') {
+                let v = v.trim();
+                match k.trim() {
+                    "zoom"           => { if let Ok(x) = v.parse() { s.zoom           = x; } }
+                    "list_width"     => { if let Ok(x) = v.parse() { s.list_width     = x; } }
+                    "tag_width"      => { if let Ok(x) = v.parse() { s.tag_width      = x; } }
+                    "caption_height" => { if let Ok(x) = v.parse() { s.caption_height = x; } }
+                    _ => {}
+                }
+            }
+        }
+    }
+    s.zoom = s.zoom.clamp(0.5, 3.0);
+    s
+}
+
+fn save_settings(s: &Settings) {
+    let path = config_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(
+        &path,
+        format!(
+            "zoom={}\nlist_width={}\ntag_width={}\ncaption_height={}\n",
+            s.zoom, s.list_width, s.tag_width, s.caption_height,
+        ),
+    );
+}
+
+// ── アプリ ────────────────────────────────────────────────────────────────────
+
 struct Entry {
     image_path: PathBuf,
     caption_path: PathBuf,
@@ -24,9 +92,21 @@ struct App {
     confirm_close: bool,
     native_ppp: f32,
     zoom: f32,
+    list_width: f32,
+    tag_width: f32,
+    caption_height: f32,
 }
 
 impl App {
+    fn current_settings(&self) -> Settings {
+        Settings {
+            zoom: self.zoom,
+            list_width: self.list_width,
+            tag_width: self.tag_width,
+            caption_height: self.caption_height,
+        }
+    }
+
     fn load_dir(&mut self, dir: &Path, ctx: &egui::Context) {
         self.pending.clear();
         let mut paths: Vec<PathBuf> = fs::read_dir(dir)
@@ -52,11 +132,7 @@ impl App {
                     .find(|p| p.exists())
                     .unwrap_or_else(|| parent.join(format!("{stem}.txt")));
                 let thumbnail = load_thumbnail(ctx, &img);
-                Entry {
-                    image_path: img,
-                    caption_path: caption,
-                    thumbnail,
-                }
+                Entry { image_path: img, caption_path: caption, thumbnail }
             })
             .collect();
         self.current = 0;
@@ -124,13 +200,13 @@ impl App {
 
     fn navigate(&mut self, delta: i32, ctx: &egui::Context) {
         let n = self.entries.len();
-        if n == 0 {
-            return;
-        }
+        if n == 0 { return; }
         let next = ((self.current as i32 + delta).rem_euclid(n as i32)) as usize;
         self.go_to(next, ctx);
     }
 }
+
+// ── ユーティリティ ────────────────────────────────────────────────────────────
 
 fn tag_color(tag: &str) -> egui::Color32 {
     const COLORS: &[egui::Color32] = &[
@@ -143,9 +219,7 @@ fn tag_color(tag: &str) -> egui::Color32 {
         egui::Color32::from_rgb(20, 184, 166),
         egui::Color32::from_rgb(249, 115, 22),
     ];
-    let hash = tag
-        .bytes()
-        .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
+    let hash = tag.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
     COLORS[hash as usize % COLORS.len()]
 }
 
@@ -167,8 +241,11 @@ fn load_texture(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle>
     Some(ctx.load_texture("image", color_image, egui::TextureOptions::LINEAR))
 }
 
+// ── UI ───────────────────────────────────────────────────────────────────────
+
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // ズームショートカット
         let (zoom_in, zoom_out, zoom_reset) = ctx.input(|i| {
             let cmd = i.modifiers.command;
             (
@@ -178,17 +255,21 @@ impl eframe::App for App {
             )
         });
         if zoom_in || zoom_out || zoom_reset {
-            if zoom_in   { self.zoom = (self.zoom + 0.1).min(3.0); }
-            if zoom_out  { self.zoom = (self.zoom - 0.1).max(0.5); }
+            if zoom_in    { self.zoom = (self.zoom + 0.1).min(3.0); }
+            if zoom_out   { self.zoom = (self.zoom - 0.1).max(0.5); }
             if zoom_reset { self.zoom = 1.0; }
             self.zoom = (self.zoom * 10.0).round() / 10.0;
             ctx.set_pixels_per_point(self.native_ppp * self.zoom);
-            save_zoom(self.zoom);
+            save_settings(&self.current_settings());
         }
 
-        if ctx.input(|i| i.viewport().close_requested()) && !self.pending.is_empty() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.confirm_close = true;
+        // 終了処理
+        if ctx.input(|i| i.viewport().close_requested()) {
+            save_settings(&self.current_settings());
+            if !self.pending.is_empty() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.confirm_close = true;
+            }
         }
 
         if self.confirm_close {
@@ -197,11 +278,7 @@ impl eframe::App for App {
                 .fixed_pos(screen.min)
                 .order(egui::Order::Background)
                 .show(ctx, |ui| {
-                    ui.painter().rect_filled(
-                        screen,
-                        egui::Rounding::ZERO,
-                        egui::Color32::from_black_alpha(160),
-                    );
+                    ui.painter().rect_filled(screen, egui::Rounding::ZERO, egui::Color32::from_black_alpha(160));
                     ui.allocate_rect(screen, egui::Sense::click());
                 });
             egui::Window::new("未保存の変更")
@@ -230,6 +307,7 @@ impl eframe::App for App {
                 });
         }
 
+        // フォルダドロップ
         let dropped_dir = ctx.input(|i| {
             i.raw.dropped_files.iter().find_map(|f| {
                 f.path.as_ref().filter(|p| p.is_dir()).cloned()
@@ -239,25 +317,22 @@ impl eframe::App for App {
             self.load_dir(&dir, ctx);
         }
 
+        // キーボードナビゲーション
         if !ctx.wants_keyboard_input() {
             let delta = ctx.input(|i| {
-                if i.key_pressed(egui::Key::ArrowLeft) {
-                    -1i32
-                } else if i.key_pressed(egui::Key::ArrowRight) {
-                    1
-                } else {
-                    0
-                }
+                if i.key_pressed(egui::Key::ArrowLeft) { -1i32 }
+                else if i.key_pressed(egui::Key::ArrowRight) { 1 }
+                else { 0 }
             });
-            if delta != 0 {
-                self.navigate(delta, ctx);
-            }
+            if delta != 0 { self.navigate(delta, ctx); }
         }
 
         let n = self.entries.len();
         let current_dirty = self.pending.contains_key(&self.current);
         let any_dirty = !self.pending.is_empty();
+        let mouse_released = ctx.input(|i| i.pointer.primary_released());
 
+        // トップバー
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if ui.button("Open Directory").clicked() {
@@ -267,36 +342,24 @@ impl eframe::App for App {
                 }
                 if n > 0 {
                     ui.separator();
-                    if ui.button("◀ Prev").clicked() {
-                        self.navigate(-1, ctx);
-                    }
-                    if ui.button("Next ▶").clicked() {
-                        self.navigate(1, ctx);
-                    }
-                    let name = self.entries[self.current]
-                        .image_path
-                        .file_name()
-                        .unwrap()
-                        .to_string_lossy()
-                        .to_string();
+                    if ui.button("◀ Prev").clicked() { self.navigate(-1, ctx); }
+                    if ui.button("Next ▶").clicked() { self.navigate(1, ctx); }
+                    let name = self.entries[self.current].image_path.file_name().unwrap().to_string_lossy().to_string();
                     let label = if current_dirty {
                         format!("* {}/{}: {name}", self.current + 1, n)
                     } else {
                         format!("{}/{}: {name}", self.current + 1, n)
                     };
                     ui.label(label);
-                    if current_dirty && ui.button("Save").clicked() {
-                        self.save_current();
-                    }
-                    if any_dirty && ui.button("Save All").clicked() {
-                        self.save_all();
-                    }
+                    if current_dirty && ui.button("Save").clicked() { self.save_current(); }
+                    if any_dirty && ui.button("Save All").clicked() { self.save_all(); }
                 }
             });
         });
 
-        egui::SidePanel::left("list")
-            .default_width(300.0)
+        // 左パネル（ファイルリスト）
+        let list_panel = egui::SidePanel::left("list")
+            .default_width(self.list_width)
             .min_width(20.0)
             .show(ctx, |ui| {
                 ui.set_min_width(ui.available_width());
@@ -305,21 +368,12 @@ impl eframe::App for App {
                         let (thumb_info, name, is_entry_dirty) = {
                             let e = &self.entries[i];
                             let info = e.thumbnail.as_ref().map(|t| (t.id(), t.size()));
-                            let name = e
-                                .image_path
-                                .file_name()
-                                .unwrap()
-                                .to_string_lossy()
-                                .to_string();
+                            let name = e.image_path.file_name().unwrap().to_string_lossy().to_string();
                             let dirty = self.pending.contains_key(&i);
                             (info, name, dirty)
                         };
                         let is_selected = i == self.current;
-                        let fill = if is_selected {
-                            ui.visuals().selection.bg_fill
-                        } else {
-                            egui::Color32::TRANSPARENT
-                        };
+                        let fill = if is_selected { ui.visuals().selection.bg_fill } else { egui::Color32::TRANSPARENT };
                         let available_width = ui.available_width();
                         let row = egui::Frame::none().fill(fill).show(ui, |ui| {
                             ui.set_min_width(available_width);
@@ -331,25 +385,13 @@ impl eframe::App for App {
                                 }
                                 ui.vertical(|ui| {
                                     if is_entry_dirty {
-                                        ui.label(
-                                            egui::RichText::new("●")
-                                                .color(egui::Color32::from_rgb(245, 158, 11))
-                                                .small(),
-                                        );
+                                        ui.label(egui::RichText::new("●").color(egui::Color32::from_rgb(245, 158, 11)).small());
                                     }
                                     ui.add(egui::Label::new(&name).truncate());
                                 });
                             });
                         });
-                        if ui
-                            .interact(
-                                row.response.rect,
-                                egui::Id::new("row").with(i),
-                                egui::Sense::click(),
-                            )
-                            .clicked()
-                            && !is_selected
-                        {
+                        if ui.interact(row.response.rect, egui::Id::new("row").with(i), egui::Sense::click()).clicked() && !is_selected {
                             self.go_to(i, ctx);
                         }
                         ui.separator();
@@ -357,35 +399,31 @@ impl eframe::App for App {
                 });
             });
 
-        egui::SidePanel::right("tag_counts")
+        // 右パネル（タグ頻度）
+        let tag_panel = egui::SidePanel::right("tag_counts")
+            .default_width(self.tag_width)
             .min_width(160.0)
             .show(ctx, |ui| {
                 ui.label(format!("Tags ({})", self.tag_counts.len()));
                 ui.separator();
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    egui::Grid::new("tag_grid")
-                        .num_columns(2)
-                        .striped(true)
-                        .show(ui, |ui| {
-                            for (tag, count) in &self.tag_counts {
-                                ui.label(tag.as_str());
-                                ui.label(count.to_string());
-                                ui.end_row();
-                            }
-                        });
+                    egui::Grid::new("tag_grid").num_columns(2).striped(true).show(ui, |ui| {
+                        for (tag, count) in &self.tag_counts {
+                            ui.label(tag.as_str());
+                            ui.label(count.to_string());
+                            ui.end_row();
+                        }
+                    });
                 });
             });
 
-        egui::TopBottomPanel::bottom("caption")
+        // 下パネル（キャプション編集）
+        let caption_panel = egui::TopBottomPanel::bottom("caption")
             .resizable(true)
             .min_height(120.0)
+            .default_height(self.caption_height)
             .show(ctx, |ui| {
-                let tags: Vec<String> = self
-                    .caption
-                    .split(',')
-                    .map(|t| t.trim().to_string())
-                    .filter(|t| !t.is_empty())
-                    .collect();
+                let tags: Vec<String> = self.caption.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
                 let mut remove_idx: Option<usize> = None;
                 let mut new_drag_idx = self.drag_idx;
                 let mut drop_target: Option<usize> = None;
@@ -400,12 +438,7 @@ impl eframe::App for App {
                                 let being_dragged = self.drag_idx == Some(i);
                                 let base = tag_color(tag);
                                 let fill = if being_dragged {
-                                    egui::Color32::from_rgba_unmultiplied(
-                                        base.r(),
-                                        base.g(),
-                                        base.b(),
-                                        100,
-                                    )
+                                    egui::Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 100)
                                 } else {
                                     base
                                 };
@@ -417,48 +450,28 @@ impl eframe::App for App {
                                         ui.horizontal(|ui| {
                                             ui.spacing_mut().item_spacing.x = 4.0;
                                             let handle = ui.add(
-                                                egui::Label::new(
-                                                    egui::RichText::new("≡")
-                                                        .color(egui::Color32::from_white_alpha(160)),
-                                                )
-                                                .sense(egui::Sense::drag())
-                                                .selectable(false),
+                                                egui::Label::new(egui::RichText::new("≡").color(egui::Color32::from_white_alpha(160)))
+                                                    .sense(egui::Sense::drag())
+                                                    .selectable(false),
                                             );
                                             ui.add(
-                                                egui::Label::new(
-                                                    egui::RichText::new(tag.as_str())
-                                                        .color(egui::Color32::WHITE),
-                                                )
-                                                .selectable(false),
+                                                egui::Label::new(egui::RichText::new(tag.as_str()).color(egui::Color32::WHITE))
+                                                    .selectable(false),
                                             );
                                             if !being_dragged {
-                                                if ui
-                                                    .add(
-                                                        egui::Label::new(
-                                                            egui::RichText::new("⊗")
-                                                                .color(egui::Color32::WHITE),
-                                                        )
+                                                if ui.add(
+                                                    egui::Label::new(egui::RichText::new("⊗").color(egui::Color32::WHITE))
                                                         .sense(egui::Sense::click())
                                                         .selectable(false),
-                                                    )
-                                                    .clicked()
-                                                {
+                                                ).clicked() {
                                                     remove_idx = Some(i);
                                                 }
                                             }
                                             handle
-                                        })
-                                        .inner
+                                        }).inner
                                     });
-                                if inner.inner.drag_started() {
-                                    new_drag_idx = Some(i);
-                                }
-                                // ポインタ位置で直接ホバー判定（drag中はhovered()が抑制されるため）
-                                let hovered = ctx.input(|inp| {
-                                    inp.pointer
-                                        .hover_pos()
-                                        .is_some_and(|p| inner.response.rect.contains(p))
-                                });
+                                if inner.inner.drag_started() { new_drag_idx = Some(i); }
+                                let hovered = ctx.input(|inp| inp.pointer.hover_pos().is_some_and(|p| inner.response.rect.contains(p)));
                                 if being_dragged {
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                                 } else if self.drag_idx.is_none() && inner.inner.hovered() {
@@ -466,24 +479,14 @@ impl eframe::App for App {
                                 }
                                 if self.drag_idx.is_some() && !being_dragged && hovered {
                                     drop_target = Some(i);
-                                    ui.painter().rect_stroke(
-                                        inner.response.rect.expand(2.0),
-                                        egui::Rounding::same(9.0),
-                                        egui::Stroke::new(2.0, egui::Color32::WHITE),
-                                    );
+                                    ui.painter().rect_stroke(inner.response.rect.expand(2.0), egui::Rounding::same(9.0), egui::Stroke::new(2.0, egui::Color32::WHITE));
                                 }
                             }
                         });
                     });
 
                 if let Some(i) = remove_idx {
-                    self.caption = tags
-                        .iter()
-                        .enumerate()
-                        .filter(|&(j, _)| j != i)
-                        .map(|(_, t)| t.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                    self.caption = tags.iter().enumerate().filter(|&(j, _)| j != i).map(|(_, t)| t.as_str()).collect::<Vec<_>>().join(", ");
                     self.mark_dirty();
                 }
                 if released {
@@ -501,9 +504,7 @@ impl eframe::App for App {
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.label("add tag");
-                    let r = ui.add(
-                        egui::TextEdit::singleline(&mut self.add_tag_input).desired_width(300.0),
-                    );
+                    let r = ui.add(egui::TextEdit::singleline(&mut self.add_tag_input).desired_width(300.0));
                     let enter = r.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter));
                     if ui.button("Insert").clicked() || enter {
                         let new_tag = self.add_tag_input.trim().to_string();
@@ -521,11 +522,24 @@ impl eframe::App for App {
                 });
             });
 
-        let hovering_dir = ctx.input(|i| {
-            i.raw.hovered_files.iter().any(|f| {
-                f.path.as_ref().is_some_and(|p| p.is_dir())
-            })
-        });
+        // パネルサイズ変化を検出して保存（マウス離し時）
+        if mouse_released {
+            let new_lw = list_panel.response.rect.width();
+            let new_tw = tag_panel.response.rect.width();
+            let new_ch = caption_panel.response.rect.height();
+            if (new_lw - self.list_width).abs() > 0.5
+                || (new_tw - self.tag_width).abs() > 0.5
+                || (new_ch - self.caption_height).abs() > 0.5
+            {
+                self.list_width = new_lw;
+                self.tag_width = new_tw;
+                self.caption_height = new_ch;
+                save_settings(&self.current_settings());
+            }
+        }
+
+        // 中央パネル（画像表示）
+        let hovering_dir = ctx.input(|i| i.raw.hovered_files.iter().any(|f| f.path.as_ref().is_some_and(|p| p.is_dir())));
 
         egui::CentralPanel::default().show(ctx, |ui| {
             match &self.texture {
@@ -533,62 +547,22 @@ impl eframe::App for App {
                     let avail = ui.available_size();
                     let img_size = tex.size_vec2();
                     let scale = (avail.x / img_size.x).min(avail.y / img_size.y).min(1.0);
-                    ui.centered_and_justified(|ui| {
-                        ui.image((tex.id(), img_size * scale));
-                    });
+                    ui.centered_and_justified(|ui| { ui.image((tex.id(), img_size * scale)); });
                 }
                 None => {
-                    ui.centered_and_justified(|ui| {
-                        ui.label("ディレクトリを開いてください");
-                    });
+                    ui.centered_and_justified(|ui| { ui.label("ディレクトリを開いてください"); });
                 }
             }
             if hovering_dir {
                 let rect = ui.ctx().screen_rect();
-                ui.painter().rect_filled(
-                    rect,
-                    egui::Rounding::same(0.0),
-                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
-                );
-                ui.painter().text(
-                    rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "ここにドロップ",
-                    egui::FontId::proportional(32.0),
-                    egui::Color32::WHITE,
-                );
+                ui.painter().rect_filled(rect, egui::Rounding::ZERO, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160));
+                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "ここにドロップ", egui::FontId::proportional(32.0), egui::Color32::WHITE);
             }
         });
     }
 }
 
-fn config_path() -> PathBuf {
-    #[cfg(target_os = "windows")]
-    let base = std::env::var("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."));
-    #[cfg(not(target_os = "windows"))]
-    let base = std::env::var("HOME")
-        .map(|h| PathBuf::from(h).join(".cache"))
-        .unwrap_or_else(|_| PathBuf::from("."));
-    base.join("dataset-tag-editor-rust").join("settings.txt")
-}
-
-fn load_zoom() -> f32 {
-    fs::read_to_string(config_path())
-        .ok()
-        .and_then(|s| s.trim().parse::<f32>().ok())
-        .unwrap_or(1.0)
-        .clamp(0.5, 3.0)
-}
-
-fn save_zoom(zoom: f32) {
-    let path = config_path();
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let _ = fs::write(path, zoom.to_string());
-}
+// ── フォント・起動 ────────────────────────────────────────────────────────────
 
 fn setup_fonts(ctx: &egui::Context) {
     #[cfg(target_os = "macos")]
@@ -630,11 +604,14 @@ fn main() -> eframe::Result<()> {
         Box::new(|cc| {
             setup_fonts(&cc.egui_ctx);
             let native_ppp = cc.egui_ctx.pixels_per_point();
-            let zoom = load_zoom();
-            cc.egui_ctx.set_pixels_per_point(native_ppp * zoom);
+            let s = load_settings();
+            cc.egui_ctx.set_pixels_per_point(native_ppp * s.zoom);
             Ok(Box::new(App {
                 native_ppp,
-                zoom,
+                zoom: s.zoom,
+                list_width: s.list_width,
+                tag_width: s.tag_width,
+                caption_height: s.caption_height,
                 ..Default::default()
             }))
         }),
