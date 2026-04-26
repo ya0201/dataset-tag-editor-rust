@@ -15,6 +15,7 @@ struct App {
     texture: Option<egui::TextureHandle>,
     dirty: bool,
     tag_counts: Vec<(String, usize)>,
+    add_tag_input: String,
 }
 
 impl App {
@@ -90,6 +91,21 @@ impl App {
         let next = ((self.current as i32 + delta).rem_euclid(n as i32)) as usize;
         self.go_to(next, ctx);
     }
+}
+
+fn tag_color(tag: &str) -> egui::Color32 {
+    const COLORS: &[egui::Color32] = &[
+        egui::Color32::from_rgb(99, 102, 241),
+        egui::Color32::from_rgb(139, 92, 246),
+        egui::Color32::from_rgb(59, 130, 246),
+        egui::Color32::from_rgb(16, 185, 129),
+        egui::Color32::from_rgb(245, 158, 11),
+        egui::Color32::from_rgb(236, 72, 153),
+        egui::Color32::from_rgb(20, 184, 166),
+        egui::Color32::from_rgb(249, 115, 22),
+    ];
+    let hash = tag.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
+    COLORS[hash as usize % COLORS.len()]
 }
 
 fn load_thumbnail(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
@@ -182,14 +198,67 @@ impl eframe::App for App {
             });
         });
 
-        egui::TopBottomPanel::bottom("caption").resizable(true).show(ctx, |ui| {
-            ui.label("Caption:");
-            let r = ui.add(
-                egui::TextEdit::multiline(&mut self.caption)
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(3),
-            );
-            if r.changed() { self.dirty = true; }
+        egui::TopBottomPanel::bottom("caption").resizable(true).min_height(120.0).show(ctx, |ui| {
+            let tags: Vec<String> = self.caption.split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect();
+            let mut remove_idx: Option<usize> = None;
+
+            egui::ScrollArea::vertical()
+                .max_height(ui.available_height() - 36.0)
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                        for (i, tag) in tags.iter().enumerate() {
+                            egui::Frame::none()
+                                .fill(tag_color(tag))
+                                .rounding(egui::Rounding::same(8.0))
+                                .inner_margin(egui::Margin::symmetric(8.0, 4.0))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                        ui.label(egui::RichText::new(tag.as_str()).color(egui::Color32::WHITE));
+                                        if ui.add(egui::Label::new(
+                                            egui::RichText::new("⊗").color(egui::Color32::WHITE)
+                                        ).sense(egui::Sense::click())).clicked() {
+                                            remove_idx = Some(i);
+                                        }
+                                    });
+                                });
+                        }
+                    });
+                });
+
+            if let Some(i) = remove_idx {
+                self.caption = tags.iter()
+                    .enumerate()
+                    .filter(|&(j, _)| j != i)
+                    .map(|(_, t)| t.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                self.dirty = true;
+            }
+
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label("add tag");
+                let r = ui.add(egui::TextEdit::singleline(&mut self.add_tag_input).desired_width(300.0));
+                let enter = r.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter));
+                if ui.button("Insert").clicked() || enter {
+                    let new_tag = self.add_tag_input.trim().to_string();
+                    if !new_tag.is_empty() {
+                        if self.caption.trim().is_empty() {
+                            self.caption = new_tag;
+                        } else {
+                            self.caption.push_str(", ");
+                            self.caption.push_str(&new_tag);
+                        }
+                        self.add_tag_input.clear();
+                        self.dirty = true;
+                    }
+                }
+            });
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
