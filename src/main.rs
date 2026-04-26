@@ -46,11 +46,29 @@ fn load_settings() -> Settings {
             if let Some((k, v)) = line.split_once('=') {
                 let v = v.trim();
                 match k.trim() {
-                    "zoom"           => { if let Ok(x) = v.parse() { s.zoom           = x; } }
-                    "list_width"     => { if let Ok(x) = v.parse() { s.list_width     = x; } }
-                    "tag_width"      => { if let Ok(x) = v.parse() { s.tag_width      = x; } }
-                    "caption_height" => { if let Ok(x) = v.parse() { s.caption_height = x; } }
-                    "last_dir"       => { s.last_dir = Some(PathBuf::from(v)); }
+                    "zoom" => {
+                        if let Ok(x) = v.parse() {
+                            s.zoom = x;
+                        }
+                    }
+                    "list_width" => {
+                        if let Ok(x) = v.parse() {
+                            s.list_width = x;
+                        }
+                    }
+                    "tag_width" => {
+                        if let Ok(x) = v.parse() {
+                            s.tag_width = x;
+                        }
+                    }
+                    "caption_height" => {
+                        if let Ok(x) = v.parse() {
+                            s.caption_height = x;
+                        }
+                    }
+                    "last_dir" => {
+                        s.last_dir = Some(PathBuf::from(v));
+                    }
                     _ => {}
                 }
             }
@@ -141,7 +159,11 @@ impl App {
                     .find(|p| p.exists())
                     .unwrap_or_else(|| parent.join(format!("{stem}.txt")));
                 let thumbnail = load_thumbnail(ctx, &img);
-                Entry { image_path: img, caption_path: caption, thumbnail }
+                Entry {
+                    image_path: img,
+                    caption_path: caption,
+                    thumbnail,
+                }
             })
             .collect();
         self.current = 0;
@@ -163,7 +185,9 @@ impl App {
     fn rebuild_tag_counts(&mut self) {
         let mut counts: HashMap<String, usize> = HashMap::new();
         for (i, entry) in self.entries.iter().enumerate() {
-            let text = self.pending.get(&i)
+            let text = self
+                .pending
+                .get(&i)
                 .cloned()
                 .unwrap_or_else(|| fs::read_to_string(&entry.caption_path).unwrap_or_default());
             for tag in text.split(',') {
@@ -183,7 +207,9 @@ impl App {
         self.texture = None;
         self.drag_idx = None;
         if let Some(entry) = self.entries.get(self.current) {
-            self.caption = self.pending.get(&self.current)
+            self.caption = self
+                .pending
+                .get(&self.current)
                 .cloned()
                 .unwrap_or_else(|| fs::read_to_string(&entry.caption_path).unwrap_or_default());
             self.texture = load_texture(ctx, &entry.image_path);
@@ -220,7 +246,9 @@ impl App {
 
     fn navigate(&mut self, delta: i32, ctx: &egui::Context) {
         let n = self.entries.len();
-        if n == 0 { return; }
+        if n == 0 {
+            return;
+        }
         let next = ((self.current as i32 + delta).rem_euclid(n as i32)) as usize;
         self.go_to(next, ctx);
     }
@@ -239,7 +267,9 @@ fn tag_color(tag: &str) -> egui::Color32 {
         egui::Color32::from_rgb(20, 184, 166),
         egui::Color32::from_rgb(249, 115, 22),
     ];
-    let hash = tag.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
+    let hash = tag
+        .bytes()
+        .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
     COLORS[hash as usize % COLORS.len()]
 }
 
@@ -267,7 +297,11 @@ fn show_overlay(ctx: &egui::Context) {
         .fixed_pos(screen.min)
         .order(egui::Order::Background)
         .show(ctx, |ui| {
-            ui.painter().rect_filled(screen, egui::Rounding::ZERO, egui::Color32::from_black_alpha(160));
+            ui.painter().rect_filled(
+                screen,
+                egui::Rounding::ZERO,
+                egui::Color32::from_black_alpha(160),
+            );
             ui.allocate_rect(screen, egui::Sense::click());
         });
 }
@@ -293,9 +327,15 @@ impl eframe::App for App {
             )
         });
         if zoom_in || zoom_out || zoom_reset {
-            if zoom_in    { self.zoom = (self.zoom + 0.1).min(3.0); }
-            if zoom_out   { self.zoom = (self.zoom - 0.1).max(0.5); }
-            if zoom_reset { self.zoom = 1.0; }
+            if zoom_in {
+                self.zoom = (self.zoom + 0.1).min(3.0);
+            }
+            if zoom_out {
+                self.zoom = (self.zoom - 0.1).max(0.5);
+            }
+            if zoom_reset {
+                self.zoom = 1.0;
+            }
             self.zoom = (self.zoom * 10.0).round() / 10.0;
             ctx.set_pixels_per_point(self.native_ppp * self.zoom);
             save_settings(&self.current_settings());
@@ -314,11 +354,15 @@ impl eframe::App for App {
         if self.confirm_close {
             show_overlay(ctx);
             egui::Window::new("未保存の変更")
-                .collapsible(false).resizable(false)
+                .collapsible(false)
+                .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
-                    ui.label(format!("{}件の未保存の変更があります。", self.pending.len()));
+                    ui.label(format!(
+                        "{}件の未保存の変更があります。",
+                        self.pending.len()
+                    ));
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         if ui.button("全保存して終了").clicked() {
@@ -342,11 +386,15 @@ impl eframe::App for App {
         if self.confirm_close_dir {
             show_overlay(ctx);
             egui::Window::new("未保存の変更##dir")
-                .collapsible(false).resizable(false)
+                .collapsible(false)
+                .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
-                    ui.label(format!("{}件の未保存の変更があります。", self.pending.len()));
+                    ui.label(format!(
+                        "{}件の未保存の変更があります。",
+                        self.pending.len()
+                    ));
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         if ui.button("全保存して閉じる").clicked() {
@@ -369,9 +417,10 @@ impl eframe::App for App {
 
         // フォルダドロップ
         let dropped_dir = ctx.input(|i| {
-            i.raw.dropped_files.iter().find_map(|f| {
-                f.path.as_ref().filter(|p| p.is_dir()).cloned()
-            })
+            i.raw
+                .dropped_files
+                .iter()
+                .find_map(|f| f.path.as_ref().filter(|p| p.is_dir()).cloned())
         });
         if let Some(dir) = dropped_dir {
             self.load_dir(&dir, ctx);
@@ -381,11 +430,17 @@ impl eframe::App for App {
         // キーボードナビゲーション
         if !ctx.wants_keyboard_input() {
             let delta = ctx.input(|i| {
-                if i.key_pressed(egui::Key::ArrowLeft) { -1i32 }
-                else if i.key_pressed(egui::Key::ArrowRight) { 1 }
-                else { 0 }
+                if i.key_pressed(egui::Key::ArrowLeft) {
+                    -1i32
+                } else if i.key_pressed(egui::Key::ArrowRight) {
+                    1
+                } else {
+                    0
+                }
             });
-            if delta != 0 { self.navigate(delta, ctx); }
+            if delta != 0 {
+                self.navigate(delta, ctx);
+            }
         }
 
         let n = self.entries.len();
@@ -413,17 +468,30 @@ impl eframe::App for App {
                 }
                 if n > 0 {
                     ui.separator();
-                    if ui.button("◀ Prev").clicked() { self.navigate(-1, ctx); }
-                    if ui.button("Next ▶").clicked() { self.navigate(1, ctx); }
-                    let name = self.entries[self.current].image_path.file_name().unwrap().to_string_lossy().to_string();
+                    if ui.button("◀ Prev").clicked() {
+                        self.navigate(-1, ctx);
+                    }
+                    if ui.button("Next ▶").clicked() {
+                        self.navigate(1, ctx);
+                    }
+                    let name = self.entries[self.current]
+                        .image_path
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string();
                     let label = if current_dirty {
                         format!("* {}/{}: {name}", self.current + 1, n)
                     } else {
                         format!("{}/{}: {name}", self.current + 1, n)
                     };
                     ui.label(label);
-                    if current_dirty && ui.button("Save").clicked() { self.save_current(); }
-                    if any_dirty && ui.button("Save All").clicked() { self.save_all(); }
+                    if current_dirty && ui.button("Save").clicked() {
+                        self.save_current();
+                    }
+                    if any_dirty && ui.button("Save All").clicked() {
+                        self.save_all();
+                    }
                 }
             });
         });
@@ -439,12 +507,21 @@ impl eframe::App for App {
                         let (thumb_info, name, is_entry_dirty) = {
                             let e = &self.entries[i];
                             let info = e.thumbnail.as_ref().map(|t| (t.id(), t.size()));
-                            let name = e.image_path.file_name().unwrap().to_string_lossy().to_string();
+                            let name = e
+                                .image_path
+                                .file_name()
+                                .unwrap()
+                                .to_string_lossy()
+                                .to_string();
                             let dirty = self.pending.contains_key(&i);
                             (info, name, dirty)
                         };
                         let is_selected = i == self.current;
-                        let fill = if is_selected { ui.visuals().selection.bg_fill } else { egui::Color32::TRANSPARENT };
+                        let fill = if is_selected {
+                            ui.visuals().selection.bg_fill
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        };
                         let available_width = ui.available_width();
                         let row = egui::Frame::none().fill(fill).show(ui, |ui| {
                             ui.set_min_width(available_width);
@@ -456,13 +533,25 @@ impl eframe::App for App {
                                 }
                                 ui.vertical(|ui| {
                                     if is_entry_dirty {
-                                        ui.label(egui::RichText::new("●").color(egui::Color32::from_rgb(245, 158, 11)).small());
+                                        ui.label(
+                                            egui::RichText::new("●")
+                                                .color(egui::Color32::from_rgb(245, 158, 11))
+                                                .small(),
+                                        );
                                     }
                                     ui.add(egui::Label::new(&name).truncate());
                                 });
                             });
                         });
-                        if ui.interact(row.response.rect, egui::Id::new("row").with(i), egui::Sense::click()).clicked() && !is_selected {
+                        if ui
+                            .interact(
+                                row.response.rect,
+                                egui::Id::new("row").with(i),
+                                egui::Sense::click(),
+                            )
+                            .clicked()
+                            && !is_selected
+                        {
                             self.go_to(i, ctx);
                         }
                         ui.separator();
@@ -478,13 +567,16 @@ impl eframe::App for App {
                 ui.label(format!("Tags ({})", self.tag_counts.len()));
                 ui.separator();
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    egui::Grid::new("tag_grid").num_columns(2).striped(true).show(ui, |ui| {
-                        for (tag, count) in &self.tag_counts {
-                            ui.label(tag.as_str());
-                            ui.label(count.to_string());
-                            ui.end_row();
-                        }
-                    });
+                    egui::Grid::new("tag_grid")
+                        .num_columns(2)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for (tag, count) in &self.tag_counts {
+                                ui.label(tag.as_str());
+                                ui.label(count.to_string());
+                                ui.end_row();
+                            }
+                        });
                 });
             });
 
@@ -494,7 +586,12 @@ impl eframe::App for App {
             .min_height(120.0)
             .default_height(self.caption_height)
             .show(ctx, |ui| {
-                let tags: Vec<String> = self.caption.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
+                let tags: Vec<String> = self
+                    .caption
+                    .split(',')
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect();
                 let mut remove_idx: Option<usize> = None;
                 let mut new_drag_idx = self.drag_idx;
                 let mut drop_target: Option<usize> = None;
@@ -509,7 +606,12 @@ impl eframe::App for App {
                                 let being_dragged = self.drag_idx == Some(i);
                                 let base = tag_color(tag);
                                 let fill = if being_dragged {
-                                    egui::Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 100)
+                                    egui::Color32::from_rgba_unmultiplied(
+                                        base.r(),
+                                        base.g(),
+                                        base.b(),
+                                        100,
+                                    )
                                 } else {
                                     base
                                 };
@@ -521,28 +623,48 @@ impl eframe::App for App {
                                         ui.horizontal(|ui| {
                                             ui.spacing_mut().item_spacing.x = 4.0;
                                             let handle = ui.add(
-                                                egui::Label::new(egui::RichText::new("≡").color(egui::Color32::from_white_alpha(160)))
-                                                    .sense(egui::Sense::drag())
-                                                    .selectable(false),
+                                                egui::Label::new(
+                                                    egui::RichText::new("≡").color(
+                                                        egui::Color32::from_white_alpha(160),
+                                                    ),
+                                                )
+                                                .sense(egui::Sense::drag())
+                                                .selectable(false),
                                             );
                                             ui.add(
-                                                egui::Label::new(egui::RichText::new(tag.as_str()).color(egui::Color32::WHITE))
-                                                    .selectable(false),
+                                                egui::Label::new(
+                                                    egui::RichText::new(tag.as_str())
+                                                        .color(egui::Color32::WHITE),
+                                                )
+                                                .selectable(false),
                                             );
                                             if !being_dragged {
-                                                if ui.add(
-                                                    egui::Label::new(egui::RichText::new("⊗").color(egui::Color32::WHITE))
+                                                if ui
+                                                    .add(
+                                                        egui::Label::new(
+                                                            egui::RichText::new("⊗")
+                                                                .color(egui::Color32::WHITE),
+                                                        )
                                                         .sense(egui::Sense::click())
                                                         .selectable(false),
-                                                ).clicked() {
+                                                    )
+                                                    .clicked()
+                                                {
                                                     remove_idx = Some(i);
                                                 }
                                             }
                                             handle
-                                        }).inner
+                                        })
+                                        .inner
                                     });
-                                if inner.inner.drag_started() { new_drag_idx = Some(i); }
-                                let hovered = ctx.input(|inp| inp.pointer.hover_pos().is_some_and(|p| inner.response.rect.contains(p)));
+                                if inner.inner.drag_started() {
+                                    new_drag_idx = Some(i);
+                                }
+                                let hovered = ctx.input(|inp| {
+                                    inp.pointer
+                                        .hover_pos()
+                                        .is_some_and(|p| inner.response.rect.contains(p))
+                                });
                                 if being_dragged {
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                                 } else if self.drag_idx.is_none() && inner.inner.hovered() {
@@ -550,14 +672,24 @@ impl eframe::App for App {
                                 }
                                 if self.drag_idx.is_some() && !being_dragged && hovered {
                                     drop_target = Some(i);
-                                    ui.painter().rect_stroke(inner.response.rect.expand(2.0), egui::Rounding::same(9.0), egui::Stroke::new(2.0, egui::Color32::WHITE));
+                                    ui.painter().rect_stroke(
+                                        inner.response.rect.expand(2.0),
+                                        egui::Rounding::same(9.0),
+                                        egui::Stroke::new(2.0, egui::Color32::WHITE),
+                                    );
                                 }
                             }
                         });
                     });
 
                 if let Some(i) = remove_idx {
-                    self.caption = tags.iter().enumerate().filter(|&(j, _)| j != i).map(|(_, t)| t.as_str()).collect::<Vec<_>>().join(", ");
+                    self.caption = tags
+                        .iter()
+                        .enumerate()
+                        .filter(|&(j, _)| j != i)
+                        .map(|(_, t)| t.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     self.mark_dirty();
                 }
                 if released {
@@ -575,7 +707,9 @@ impl eframe::App for App {
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.label("add tag");
-                    let r = ui.add(egui::TextEdit::singleline(&mut self.add_tag_input).desired_width(300.0));
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut self.add_tag_input).desired_width(300.0),
+                    );
                     let enter = r.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter));
                     if ui.button("Insert").clicked() || enter {
                         let new_tag = self.add_tag_input.trim().to_string();
@@ -610,7 +744,12 @@ impl eframe::App for App {
         }
 
         // 中央パネル（画像表示）
-        let hovering_dir = ctx.input(|i| i.raw.hovered_files.iter().any(|f| f.path.as_ref().is_some_and(|p| p.is_dir())));
+        let hovering_dir = ctx.input(|i| {
+            i.raw
+                .hovered_files
+                .iter()
+                .any(|f| f.path.as_ref().is_some_and(|p| p.is_dir()))
+        });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             match &self.texture {
@@ -618,16 +757,30 @@ impl eframe::App for App {
                     let avail = ui.available_size();
                     let img_size = tex.size_vec2();
                     let scale = (avail.x / img_size.x).min(avail.y / img_size.y).min(1.0);
-                    ui.centered_and_justified(|ui| { ui.image((tex.id(), img_size * scale)); });
+                    ui.centered_and_justified(|ui| {
+                        ui.image((tex.id(), img_size * scale));
+                    });
                 }
                 None => {
-                    ui.centered_and_justified(|ui| { ui.label("ディレクトリを開いてください"); });
+                    ui.centered_and_justified(|ui| {
+                        ui.label("ディレクトリを開いてください");
+                    });
                 }
             }
             if hovering_dir {
                 let rect = ui.ctx().screen_rect();
-                ui.painter().rect_filled(rect, egui::Rounding::ZERO, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160));
-                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "ここにドロップ", egui::FontId::proportional(32.0), egui::Color32::WHITE);
+                ui.painter().rect_filled(
+                    rect,
+                    egui::Rounding::ZERO,
+                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+                );
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "ここにドロップ",
+                    egui::FontId::proportional(32.0),
+                    egui::Color32::WHITE,
+                );
             }
         });
     }
@@ -654,9 +807,15 @@ fn setup_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     for path in candidates {
         if let Ok(data) = fs::read(path) {
-            fonts.font_data.insert("jp".to_owned(), egui::FontData::from_owned(data));
+            fonts
+                .font_data
+                .insert("jp".to_owned(), egui::FontData::from_owned(data));
             for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-                fonts.families.entry(family).or_default().push("jp".to_owned());
+                fonts
+                    .families
+                    .entry(family)
+                    .or_default()
+                    .push("jp".to_owned());
             }
             break;
         }
