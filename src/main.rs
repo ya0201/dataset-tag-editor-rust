@@ -16,6 +16,7 @@ struct App {
     dirty: bool,
     tag_counts: Vec<(String, usize)>,
     add_tag_input: String,
+    drag_idx: Option<usize>,
 }
 
 impl App {
@@ -63,6 +64,7 @@ impl App {
     fn load_entry(&mut self, ctx: &egui::Context) {
         self.caption.clear();
         self.texture = None;
+        self.drag_idx = None;
         if let Some(entry) = self.entries.get(self.current) {
             self.caption = fs::read_to_string(&entry.caption_path).unwrap_or_default();
             self.texture = load_texture(ctx, &entry.image_path);
@@ -204,6 +206,9 @@ impl eframe::App for App {
                 .filter(|t| !t.is_empty())
                 .collect();
             let mut remove_idx: Option<usize> = None;
+            let mut new_drag_idx = self.drag_idx;
+            let mut drop_target: Option<usize> = None;
+            let released = ctx.input(|i| i.pointer.primary_released());
 
             egui::ScrollArea::vertical()
                 .max_height(ui.available_height() - 36.0)
@@ -211,21 +216,55 @@ impl eframe::App for App {
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
                         for (i, tag) in tags.iter().enumerate() {
-                            egui::Frame::none()
-                                .fill(tag_color(tag))
+                            let being_dragged = self.drag_idx == Some(i);
+                            let base = tag_color(tag);
+                            let fill = if being_dragged {
+                                egui::Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 100)
+                            } else {
+                                base
+                            };
+                            let inner = egui::Frame::none()
+                                .fill(fill)
                                 .rounding(egui::Rounding::same(8.0))
                                 .inner_margin(egui::Margin::symmetric(8.0, 4.0))
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = 4.0;
                                         ui.label(egui::RichText::new(tag.as_str()).color(egui::Color32::WHITE));
-                                        if ui.add(egui::Label::new(
-                                            egui::RichText::new("⊗").color(egui::Color32::WHITE)
-                                        ).sense(egui::Sense::click())).clicked() {
-                                            remove_idx = Some(i);
+                                        if !being_dragged {
+                                            if ui.add(egui::Label::new(
+                                                egui::RichText::new("⊗").color(egui::Color32::WHITE)
+                                            ).sense(egui::Sense::click())).clicked() {
+                                                remove_idx = Some(i);
+                                            }
                                         }
                                     });
                                 });
+                            let chip_resp = ui.interact(
+                                inner.response.rect,
+                                egui::Id::new("chip").with(i),
+                                egui::Sense::drag(),
+                            );
+                            if chip_resp.drag_started() {
+                                new_drag_idx = Some(i);
+                            }
+                            // ポインタ位置で直接ホバー判定（drag中はhovered()が抑制されるため）
+                            let hovered = ctx.input(|inp| {
+                                inp.pointer.hover_pos().is_some_and(|p| inner.response.rect.contains(p))
+                            });
+                            if being_dragged {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                            } else if self.drag_idx.is_none() && hovered {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                            }
+                            if self.drag_idx.is_some() && !being_dragged && hovered {
+                                drop_target = Some(i);
+                                ui.painter().rect_stroke(
+                                    inner.response.rect.expand(2.0),
+                                    egui::Rounding::same(9.0),
+                                    egui::Stroke::new(2.0, egui::Color32::WHITE),
+                                );
+                            }
                         }
                     });
                 });
@@ -239,6 +278,17 @@ impl eframe::App for App {
                     .join(", ");
                 self.dirty = true;
             }
+            if released {
+                if let (Some(src), Some(dst)) = (self.drag_idx, drop_target) {
+                    let mut v: Vec<&str> = tags.iter().map(String::as_str).collect();
+                    let item = v.remove(src);
+                    v.insert(dst, item);
+                    self.caption = v.join(", ");
+                    self.dirty = true;
+                }
+                new_drag_idx = None;
+            }
+            self.drag_idx = new_drag_idx;
 
             ui.separator();
             ui.horizontal(|ui| {
