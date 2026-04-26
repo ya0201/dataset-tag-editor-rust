@@ -173,23 +173,23 @@ impl eframe::App for App {
                     } else {
                         egui::Color32::TRANSPARENT
                     };
-                    egui::Frame::none().fill(fill).show(ui, |ui| {
+                    let available_width = ui.available_width();
+                    let row = egui::Frame::none().fill(fill).show(ui, |ui| {
+                        ui.set_min_width(available_width);
                         ui.horizontal(|ui| {
-                            let thumb_clicked = if let Some((id, [w, h])) = thumb_info {
+                            if let Some((id, [w, h])) = thumb_info {
                                 let th = 64.0f32;
                                 let tw = w as f32 * th / h as f32;
-                                ui.add(egui::Image::new((id, egui::vec2(tw, th)))
-                                    .sense(egui::Sense::click()))
-                                    .clicked()
-                            } else { false };
-                            let label_clicked = ui.add(
-                                egui::Label::new(&name).truncate().sense(egui::Sense::click())
-                            ).clicked();
-                            if (thumb_clicked || label_clicked) && !is_selected {
-                                self.go_to(i, ctx);
+                                ui.add(egui::Image::new((id, egui::vec2(tw, th))));
                             }
+                            ui.add(egui::Label::new(&name).truncate());
                         });
                     });
+                    if ui.interact(row.response.rect, egui::Id::new("row").with(i), egui::Sense::click()).clicked()
+                        && !is_selected
+                    {
+                        self.go_to(i, ctx);
+                    }
                     ui.separator();
                 }
             });
