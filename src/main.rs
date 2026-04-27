@@ -601,6 +601,7 @@ impl eframe::App for App {
                 let tag_area_width = ui.available_width();
                 egui::ScrollArea::vertical()
                     .max_height(scroll_height)
+                    .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.set_width(tag_area_width);
                         ui.horizontal_wrapped(|ui| {
@@ -747,6 +748,11 @@ impl eframe::App for App {
                         }
                     }
                 });
+                // content_ui.min_rect() must cover the full panel inner rect so
+                // PanelState records the correct (dragged) height rather than
+                // the content height, which would cause the panel to shrink
+                // back toward min_height on every repaint.
+                ui.expand_to_include_rect(ui.max_rect());
             });
 
         // パネルサイズ変化を検出して保存（マウス離し時）
