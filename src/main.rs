@@ -51,7 +51,11 @@ fn load_icon() -> egui::IconData {
         .expect("Failed to load icon")
         .into_rgba8();
     let (width, height) = img.dimensions();
-    egui::IconData { rgba: img.into_raw(), width, height }
+    egui::IconData {
+        rgba: img.into_raw(),
+        width,
+        height,
+    }
 }
 
 fn main() -> eframe::Result<()> {
