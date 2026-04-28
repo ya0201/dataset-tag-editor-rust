@@ -40,8 +40,40 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Create archive (Unix)
-        if: matrix.os != 'windows-latest'
+      - name: Create archive (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          BIN=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[0].targets[] | select(.kind[]=="bin") | .name')
+          APP="dist/Dataset Tag Editor.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp "target/${{ matrix.target }}/release/$BIN" "$APP/Contents/MacOS/"
+          cp assets/icon.icns "$APP/Contents/Resources/"
+          cat > "$APP/Contents/Info.plist" << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>dataset-tag-editor-rust</string>
+              <key>CFBundleIconFile</key>
+              <string>icon</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.ya0201.dataset-tag-editor</string>
+              <key>CFBundleName</key>
+              <string>Dataset Tag Editor</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+          cd dist && tar -czf "${BIN}-${{ matrix.ext }}.tar.gz" "Dataset Tag Editor.app"
+
+      - name: Create archive (Linux)
+        if: matrix.os == 'ubuntu-latest'
         run: |
           mkdir -p dist
           BIN=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[0].targets[] | select(.kind[]=="bin") | .name')
