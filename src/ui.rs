@@ -1,7 +1,7 @@
-use eframe::egui;
 use crate::app::App;
 use crate::settings::save_settings;
 use crate::utils::{show_overlay, tag_color};
+use eframe::egui;
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -220,13 +220,13 @@ impl eframe::App for App {
                         let available_width = ui.available_width();
                         let row = egui::Frame::none().fill(fill).show(ui, |ui| {
                             ui.set_min_width(available_width);
-                            ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
                                 if let Some((id, [w, h])) = thumb_info {
                                     let th = 64.0f32;
                                     let tw = w as f32 * th / h as f32;
                                     ui.add(egui::Image::new((id, egui::vec2(tw, th))));
                                 }
-                                ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
                                     if is_entry_dirty {
                                         ui.label(
                                             egui::RichText::new("●")
@@ -312,42 +312,87 @@ impl eframe::App for App {
                                 let base = tag_color(tag);
 
                                 let (handle_w, tag_w, x_w) = ui.fonts(|f| {
-                                    let hw = f.layout_no_wrap("≡".to_owned(), font_id.clone(), egui::Color32::WHITE).size().x;
-                                    let tw = f.layout_no_wrap(tag.clone(), font_id.clone(), egui::Color32::WHITE).size().x;
-                                    let xw = f.layout_no_wrap("⊗".to_owned(), font_id.clone(), egui::Color32::WHITE).size().x;
+                                    let hw = f
+                                        .layout_no_wrap(
+                                            "≡".to_owned(),
+                                            font_id.clone(),
+                                            egui::Color32::WHITE,
+                                        )
+                                        .size()
+                                        .x;
+                                    let tw = f
+                                        .layout_no_wrap(
+                                            tag.clone(),
+                                            font_id.clone(),
+                                            egui::Color32::WHITE,
+                                        )
+                                        .size()
+                                        .x;
+                                    let xw = f
+                                        .layout_no_wrap(
+                                            "⊗".to_owned(),
+                                            font_id.clone(),
+                                            egui::Color32::WHITE,
+                                        )
+                                        .size()
+                                        .x;
                                     (hw, tw, xw)
                                 });
 
-                                let content_w = handle_w + inner_spacing + tag_w
-                                    + if !being_dragged { inner_spacing + x_w } else { 0.0 };
-                                let chip_size = egui::vec2(
-                                    content_w + h_margin * 2.0,
-                                    h + v_margin * 2.0,
-                                );
+                                let content_w = handle_w
+                                    + inner_spacing
+                                    + tag_w
+                                    + if !being_dragged {
+                                        inner_spacing + x_w
+                                    } else {
+                                        0.0
+                                    };
+                                let chip_size =
+                                    egui::vec2(content_w + h_margin * 2.0, h + v_margin * 2.0);
 
-                                let (rect, _) = ui.allocate_exact_size(chip_size, egui::Sense::hover());
+                                let (rect, _) =
+                                    ui.allocate_exact_size(chip_size, egui::Sense::hover());
 
                                 if ui.is_rect_visible(rect) {
                                     let fill = if being_dragged {
                                         egui::Color32::from_rgba_unmultiplied(
-                                            base.r(), base.g(), base.b(), 100,
+                                            base.r(),
+                                            base.g(),
+                                            base.b(),
+                                            100,
                                         )
                                     } else {
                                         base
                                     };
-                                    ui.painter().rect_filled(rect, egui::Rounding::same(8.0), fill);
+                                    ui.painter()
+                                        .rect_filled(rect, egui::Rounding::same(8.0), fill);
 
                                     let cy = rect.center().y;
                                     let mut cx = rect.min.x + h_margin;
-                                    ui.painter().text(egui::pos2(cx, cy), egui::Align2::LEFT_CENTER,
-                                        "≡", font_id.clone(), egui::Color32::from_white_alpha(160));
+                                    ui.painter().text(
+                                        egui::pos2(cx, cy),
+                                        egui::Align2::LEFT_CENTER,
+                                        "≡",
+                                        font_id.clone(),
+                                        egui::Color32::from_white_alpha(160),
+                                    );
                                     cx += handle_w + inner_spacing;
-                                    ui.painter().text(egui::pos2(cx, cy), egui::Align2::LEFT_CENTER,
-                                        tag.as_str(), font_id.clone(), egui::Color32::WHITE);
+                                    ui.painter().text(
+                                        egui::pos2(cx, cy),
+                                        egui::Align2::LEFT_CENTER,
+                                        tag.as_str(),
+                                        font_id.clone(),
+                                        egui::Color32::WHITE,
+                                    );
                                     cx += tag_w + inner_spacing;
                                     if !being_dragged {
-                                        ui.painter().text(egui::pos2(cx, cy), egui::Align2::LEFT_CENTER,
-                                            "⊗", font_id.clone(), egui::Color32::WHITE);
+                                        ui.painter().text(
+                                            egui::pos2(cx, cy),
+                                            egui::Align2::LEFT_CENTER,
+                                            "⊗",
+                                            font_id.clone(),
+                                            egui::Color32::WHITE,
+                                        );
                                     }
                                 }
 
@@ -357,7 +402,9 @@ impl eframe::App for App {
                                     egui::vec2(h_margin + handle_w + inner_spacing, rect.height()),
                                 );
                                 let handle_r = ui.interact(
-                                    handle_rect, egui::Id::new("hdl").with(i), egui::Sense::drag(),
+                                    handle_rect,
+                                    egui::Id::new("hdl").with(i),
+                                    egui::Sense::drag(),
                                 );
                                 if handle_r.drag_started() {
                                     new_drag_idx = Some(i);
@@ -365,13 +412,20 @@ impl eframe::App for App {
 
                                 // ⊗ delete button
                                 if !being_dragged {
-                                    let cx = rect.min.x + h_margin + handle_w + inner_spacing + tag_w + inner_spacing;
+                                    let cx = rect.min.x
+                                        + h_margin
+                                        + handle_w
+                                        + inner_spacing
+                                        + tag_w
+                                        + inner_spacing;
                                     let x_rect = egui::Rect::from_min_size(
                                         egui::pos2(cx, rect.min.y),
                                         egui::vec2(x_w + h_margin, rect.height()),
                                     );
                                     let x_r = ui.interact(
-                                        x_rect, egui::Id::new("del").with(i), egui::Sense::click(),
+                                        x_rect,
+                                        egui::Id::new("del").with(i),
+                                        egui::Sense::click(),
                                     );
                                     if x_r.clicked() {
                                         remove_idx = Some(i);

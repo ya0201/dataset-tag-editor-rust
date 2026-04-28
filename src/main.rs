@@ -3,10 +3,10 @@ mod settings;
 mod ui;
 mod utils;
 
-use eframe::egui;
-use std::fs;
 use app::App;
+use eframe::egui;
 use settings::load_settings;
+use std::fs;
 
 fn setup_fonts(ctx: &egui::Context) {
     #[cfg(target_os = "macos")]

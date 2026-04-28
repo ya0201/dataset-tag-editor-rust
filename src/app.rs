@@ -1,7 +1,11 @@
-use std::{collections::HashMap, fs, path::{Path, PathBuf}};
-use eframe::egui;
 use crate::settings::Settings;
-use crate::utils::{load_thumbnail, load_texture};
+use crate::utils::{load_texture, load_thumbnail};
+use eframe::egui;
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+};
 
 pub struct Entry {
     pub image_path: PathBuf,
@@ -67,7 +71,11 @@ impl App {
                     .find(|p| p.exists())
                     .unwrap_or_else(|| parent.join(format!("{stem}.txt")));
                 let thumbnail = load_thumbnail(ctx, &img);
-                Entry { image_path: img, caption_path: caption, thumbnail }
+                Entry {
+                    image_path: img,
+                    caption_path: caption,
+                    thumbnail,
+                }
             })
             .collect();
         self.current = 0;
