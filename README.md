@@ -1,4 +1,9 @@
 ## How to release
+
+### Github action
+run `bump-version` action
+
+### Manual release
 ```
-export tag=v1.0.0 && git tag ${tag} && git push origin ${tag}
+git switch main && export tag=vX.Y.Z && git tag ${tag} && git push origin ${tag}
 ```
